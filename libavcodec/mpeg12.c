@@ -1931,7 +1931,7 @@ static int slice_end(AVCodecContext *avctx, AVFrame *pict)
     Mpeg1Context *s1 = avctx->priv_data;
     MpegEncContext *s = &s1->mpeg_enc_ctx;
 
-    if (!s1->mpeg_enc_ctx_allocated || !s->current_picture_ptr)
+    if (!s1->mpeg_enc_ctx_allocated || !s->current_picture_ptr)  //extradata  return ,
         return 0;
 
     if (s->avctx->hwaccel) {
@@ -1952,17 +1952,20 @@ static int slice_end(AVCodecContext *avctx, AVFrame *pict)
 
         MPV_frame_end(s);
 
+        //*pict = *(AVFrame*)s->current_picture_ptr;
+        //ff_print_debug_info(s,pict);
         if (s->pict_type == FF_B_TYPE || s->low_delay) {
             *pict= *(AVFrame*)s->current_picture_ptr;
             ff_print_debug_info(s, pict);
-        } else {
+        } else {  //1I,
             s->picture_number++;
             /* latency of 1 frame for I- and P-frames */
             /* XXX: use another variable than picture_number */
-            if (s->last_picture_ptr != NULL) {
-                *pict= *(AVFrame*)s->last_picture_ptr;
+            //if (s->last_picture_ptr != NULL) {
+                //*pict= *(AVFrame*)s->last_picture_ptr;
+            *pict= *(AVFrame*)s->current_picture_ptr;
                  ff_print_debug_info(s, pict);
-            }
+           // }
         }
 
         return 1;
@@ -2303,6 +2306,7 @@ static int decode_chunks(AVCodecContext *avctx,
                 if (CONFIG_MPEG_VDPAU_DECODER && avctx->codec->capabilities&CODEC_CAP_HWACCEL_VDPAU)
                     ff_vdpau_mpeg_picture_complete(s2, buf, buf_size, s->slice_count);
 
+                *data_size = sizeof(AVPicture);
                 if (slice_end(avctx, picture)) {
                     if(s2->last_picture_ptr || s2->low_delay) //FIXME merge with the stuff in mpeg_decode_slice
                         *data_size = sizeof(AVPicture);

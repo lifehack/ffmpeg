@@ -31,6 +31,7 @@
 #include <signal.h>
 #include <limits.h>
 #include <unistd.h>
+#include <assert.h>
 #include "libavformat/avformat.h"
 #include "libavdevice/avdevice.h"
 #include "libswscale/swscale.h"
@@ -85,6 +86,8 @@
 
 const char program_name[] = "FFmpeg";
 const int program_birth_year = 2000;
+
+extern int delay_decide;
 
 /* select an input stream for an output stream */
 typedef struct AVStreamMap {
@@ -1136,7 +1139,7 @@ static void do_video_out(AVFormatContext *s,
     nb_frames = 1;
 
     *frame_size = 0;
-
+/*
     if(video_sync_method){
         double vdelta = sync_ipts - ost->sync_opts;
         //FIXME set to 0.5 after we fix some dts/pts bugs like in avidec.c
@@ -1165,7 +1168,7 @@ static void do_video_out(AVFormatContext *s,
     nb_frames= FFMIN(nb_frames, max_frames[AVMEDIA_TYPE_VIDEO] - ost->frame_number);
     if (nb_frames <= 0)
         return;
-
+*/
     formatted_picture = in_picture;
     final_picture = formatted_picture;
     padding_src = formatted_picture;
@@ -1256,6 +1259,13 @@ static void do_video_out(AVFormatContext *s,
                 big_picture.pict_type = FF_I_TYPE;
                 ost->forced_kf_index++;
             }
+            //big_picture.pict_type = in_picture->pict_type;
+            if(in_picture->pict_type == 1)
+            	delay_decide = 2;
+            else if(in_picture->pict_type == 2)
+            	delay_decide = 4;
+            else
+            	delay_decide = 1;
             ret = avcodec_encode_video(enc,
                                        bit_buffer, bit_buffer_size,
                                        &big_picture);
@@ -1346,10 +1356,10 @@ static void print_report(AVFormatContext **output_files,
     static int64_t last_time = -1;
     static int qp_histogram[52];
 
-    if (!is_last_report) {
+    /*if (!is_last_report) {
         int64_t cur_time;
         /* display the report every 0.5 seconds */
-        cur_time = av_gettime();
+        /*cur_time = av_gettime();
         if (last_time == -1) {
             last_time = cur_time;
             return;
@@ -1357,7 +1367,7 @@ static void print_report(AVFormatContext **output_files,
         if ((cur_time - last_time) < 500000)
             return;
         last_time = cur_time;
-    }
+    }*/
 
 
     oc = output_files[0];
@@ -1454,7 +1464,62 @@ static void print_report(AVFormatContext **output_files,
         );
     }
 }
+static uint8_t *ff_find_start_code_tmp(uint8_t * p,uint8_t *end, uint32_t *state)
+{
+    int i;
 
+    assert(p<=end);
+    if(p>=end)
+        return end;
+
+    for(i=0; i<3; i++){
+        uint32_t tmp= *state << 8;
+        *state= tmp + *(p++);
+        if(tmp == 0x100 || p==end)
+            return p;
+    }
+
+    while(p<end){
+        if     (p[-1] > 1      ) p+= 3;
+        else if(p[-2]          ) p+= 2;
+        else if(p[-3]|(p[-1]-1)) p++;
+        else{
+            p++;
+            break;
+        }
+    }
+
+    p= FFMIN(p, end)-4;
+    *state= AV_RB32(p);
+
+    return p+4;
+}
+static int find_start_code(AVPacket *pkt)
+{
+	uint8_t pict_type_tmp;
+	const uint8_t *buf_tmp = pkt->data;
+	int buf_size = pkt->size;
+	const uint8_t *buf_ptr_tmp = buf_tmp;  //buf_ptr是缓冲区的指针，很重要
+	const uint8_t *buf_end_tmp = buf_tmp + buf_size;
+	uint32_t start_code = -1;
+	for(;;)
+	{
+		buf_ptr_tmp = ff_find_start_code_tmp(buf_ptr_tmp,buf_end_tmp, &start_code);
+		if(start_code == 0x00000100)
+		{
+			//查找帧类型的标记，如果为I帧，返回1，否则返回0
+			buf_ptr_tmp += 1;
+			pict_type_tmp = *buf_ptr_tmp;
+			pict_type_tmp &= 0x38;
+			pict_type_tmp = pict_type_tmp >>3;
+			break;
+		}
+	}
+	if(pict_type_tmp == 1)
+	    return 1;
+	else
+		return 0;
+}
 /* pkt = NULL means EOF (needed to flush decoder buffers) */
 static int output_packet(AVInputStream *ist, int ist_index,
                          AVOutputStream **ost_table, int nb_ostreams,
@@ -1473,7 +1538,7 @@ static int output_packet(AVInputStream *ist, int ist_index,
     int frame_available;
 #endif
 
-    AVPacket avpkt;
+    AVPacket avpkt,avpkt_tmp;
     int bps = av_get_bits_per_sample_fmt(ist->st->codec->sample_fmt)>>3;
 
     if(ist->next_pts == AV_NOPTS_VALUE)
@@ -1487,6 +1552,7 @@ static int output_packet(AVInputStream *ist, int ist_index,
         goto handle_eof;
     } else {
         avpkt = *pkt;
+        avpkt_tmp = *pkt;
     }
 
     if(pkt->dts != AV_NOPTS_VALUE)
@@ -1606,12 +1672,13 @@ static int output_packet(AVInputStream *ist, int ist_index,
         }
 
 #if CONFIG_AVFILTER
+       // if(doinfo->enable_enc){
         if (ist->st->codec->codec_type == AVMEDIA_TYPE_VIDEO && ist->input_video_filter) {
             // add it to be filtered
             av_vsrc_buffer_add_frame(ist->input_video_filter, &picture,
                                      ist->pts,
                                      ist->st->codec->sample_aspect_ratio);
-        }
+        }//}
 #endif
 
         // preprocess audio (volume)
@@ -1636,7 +1703,7 @@ static int output_packet(AVInputStream *ist, int ist_index,
                 usleep(pts - now);
         }
 #if CONFIG_AVFILTER
-        frame_available = ist->st->codec->codec_type != AVMEDIA_TYPE_VIDEO ||
+        frame_available = ist->st->codec->codec_type != AVMEDIA_TYPE_VIDEO ||//doinfo->enable_copy||
             !ist->output_video_filter || avfilter_poll_frame(ist->output_video_filter->inputs[0]);
 #endif
         /* if output time reached then transcode raw format,
@@ -1645,10 +1712,12 @@ static int output_packet(AVInputStream *ist, int ist_index,
 #if CONFIG_AVFILTER
         while (frame_available) {
             AVRational ist_pts_tb;
+            //if(doinfo->enable_enc){
             if (ist->st->codec->codec_type == AVMEDIA_TYPE_VIDEO && ist->output_video_filter)
                 get_filtered_video_frame(ist->output_video_filter, &picture, &ist->picref, &ist_pts_tb);
             if (ist->picref)
                 ist->pts = av_rescale_q(ist->picref->pts, ist_pts_tb, AV_TIME_BASE_Q);
+            //}
 #endif
             for(i=0;i<nb_ostreams;i++) {
                 int frame_size;
@@ -1659,6 +1728,10 @@ static int output_packet(AVInputStream *ist, int ist_index,
 
                     /* set the input output pts pairs */
                     //ost->sync_ipts = (double)(ist->pts + input_files_ts_offset[ist->file_index] - start_time)/ AV_TIME_BASE;
+                   // if(doinfo->enable_enc && ist->st->codec->codec_type==AVMEDIA_TYPE_VIDEO)
+                    	//ost->encoding_needed = 1;
+                    //else if(doinfo->enable_copy && ist->st->codec->codec_type==AVMEDIA_TYPE_VIDEO)
+                    	//ost->encoding_needed = 0;
 
                     if (ost->encoding_needed) {
                         av_assert0(ist->decoding_needed);

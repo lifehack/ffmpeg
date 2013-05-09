@@ -44,7 +44,7 @@
 
 //#undef NDEBUG
 //#include <assert.h>
-
+int delay_decide;
 static int encode_picture(MpegEncContext *s, int picture_number);
 static int dct_quantize_refine(MpegEncContext *s, DCTELEM *block, int16_t *weight, DCTELEM *orig, int n, int qscale);
 static int sse_mb(MpegEncContext *s);
@@ -810,9 +810,9 @@ static int get_intra_count(MpegEncContext *s, uint8_t *src, uint8_t *ref, int st
 
 static int load_input_picture(MpegEncContext *s, AVFrame *pic_arg){
     AVFrame *pic=NULL;
-    int64_t pts;
+    int64_t pts; //
     int i;
-    const int encoding_delay= s->max_b_frames;
+    const int encoding_delay = 0;//delay_decide;//0;//s->max_b_frames;  //2
     int direct=1;
 
     if(pic_arg){
@@ -841,7 +841,7 @@ static int load_input_picture(MpegEncContext *s, AVFrame *pic_arg){
         }
     }
 
-  if(pic_arg){
+  if(pic_arg){ //
     if(encoding_delay && !(s->flags&CODEC_FLAG_INPUT_PRESERVED)) direct=0;
     if(pic_arg->linesize[0] != s->linesize) direct=0;
     if(pic_arg->linesize[1] != s->uvlinesize) direct=0;
@@ -850,7 +850,7 @@ static int load_input_picture(MpegEncContext *s, AVFrame *pic_arg){
 //    av_log(AV_LOG_DEBUG, "%d %d %d %d\n",pic_arg->linesize[0], pic_arg->linesize[1], s->linesize, s->uvlinesize);
 
     if(direct){
-        i= ff_find_unused_picture(s, 1);
+        i= 0;//ff_find_unused_picture(s, 1);
 
         pic= (AVFrame*)&s->picture[i];
         pic->reference= 3;
@@ -863,7 +863,7 @@ static int load_input_picture(MpegEncContext *s, AVFrame *pic_arg){
             return -1;
         }
     }else{
-        i= ff_find_unused_picture(s, 0);
+        i= 0;//ff_find_unused_picture(s, 0);  // 2 jin ru
 
         pic= (AVFrame*)&s->picture[i];
         pic->reference= 3;
@@ -1116,7 +1116,7 @@ static int select_input_picture(MpegEncContext *s){
             }
 
             if(s->avctx->b_frame_strategy==0){
-                b_frames= s->max_b_frames;
+                b_frames= 0;//s->max_b_frames;
                 while(b_frames && !s->input_picture[b_frames]) b_frames--;
             }else if(s->avctx->b_frame_strategy==1){
                 for(i=1; i<s->max_b_frames+1; i++){
@@ -1192,7 +1192,7 @@ no_output_pic:
         if(s->reordered_input_picture[0]->type == FF_BUFFER_TYPE_SHARED || s->avctx->rc_buffer_size){
             // input is a shared pix, so we can't modifiy it -> alloc a new one & ensure that the shared one is reuseable
 
-            int i= ff_find_unused_picture(s, 0);
+            int i= 0;//ff_find_unused_picture(s, 0);
             Picture *pic= &s->picture[i];
 
             pic->reference              = s->reordered_input_picture[0]->reference;
@@ -1249,20 +1249,123 @@ int MPV_encode_picture(AVCodecContext *avctx,
     }
 
     s->picture_in_gop_number++;
+    //s->encoding = 1;
 
-    if(load_input_picture(s, pic_arg) < 0)
+    if(load_input_picture(s, pic_arg) < 0)  //copy data from input pic_arg
         return -1;
 
+    //s->encoding = 1;
     if(select_input_picture(s) < 0){
         return -1;
     }
 
+    //**********************************//
+  /*  if(pic_arg->pict_type == 1)  //I
+    {
+    	s->last_pict_type = 1;
+    	for(i=0; i<4; i++){
+    	    s->last_picture.data[i]= pic_arg->data[i];
+    	    s->last_picture.linesize[i]= pic_arg->linesize[i];
+    	}
+    	s->last_picture_ptr = &(s->last_picture);
+
+
+    	for(i=0; i<4; i++){
+    	    s->current_picture.data[i]= pic_arg->data[i];
+    	    s->current_picture.linesize[i]= pic_arg->linesize[i];
+    	}
+        s->current_picture_ptr = &(s->current_picture);
+
+    	for(i=0; i<4; i++){
+    	    s->next_picture.data[i]= pic_arg->data[i];
+    	    s->next_picture.linesize[i]= pic_arg->linesize[i];
+    	}
+    	s->next_picture_ptr = &(s->next_picture);
+    	s->next_picture.pict_type = 1;
+
+    	s->input_picture[2] = (Picture*)pic_arg;
+
+    	for(i=0; i<4; i++){
+    	    s->new_picture.data[i]= pic_arg->data[i];
+    	    s->new_picture.linesize[i]= pic_arg->linesize[i];
+    	}
+    	s->new_picture.pict_type = 1;
+    	s->pict_type = 1;
+    }
+    else if(pic_arg->pict_type == 2)  //P
+    {
+    	s->last_pict_type = s->next_picture.pict_type;
+    	for(i=0; i<4; i++){
+    	    s->last_picture.data[i]= s->next_picture.data[i];
+    	    s->last_picture.linesize[i]= s->next_picture.linesize[i];
+    	}
+    	s->last_picture_ptr = s->next_picture_ptr;
+
+
+    	for(i=0; i<4; i++){
+    	    s->current_picture.data[i]= pic_arg->data[i];
+    	    s->current_picture.linesize[i]= pic_arg->linesize[i];
+    	}
+        s->current_picture_ptr = &(s->current_picture);
+
+    	for(i=0; i<4; i++){
+    	    s->next_picture.data[i]= pic_arg->data[i];
+    	    s->next_picture.linesize[i]= pic_arg->linesize[i];
+    	}
+    	s->next_picture_ptr = &(s->next_picture);
+    	s->next_picture.pict_type = 2;
+
+    	s->input_picture[2] = (Picture*)pic_arg;
+
+    	for(i=0; i<4; i++){
+    	    s->new_picture.data[i]= pic_arg->data[i];
+    	    s->new_picture.linesize[i]= pic_arg->linesize[i];
+    	}
+    	s->new_picture.pict_type = 2;
+    	s->pict_type = 2;
+    }
+    else
+    {
+    	for(i=0; i<4; i++){
+    	    s->current_picture.data[i]= pic_arg->data[i];
+    	    s->current_picture.linesize[i]= pic_arg->linesize[i];
+    	}
+    	s->current_picture_ptr = &(s->current_picture);
+
+    	for(i=0; i<4; i++){
+    	    s->new_picture.data[i]= pic_arg->data[i];
+    	    s->new_picture.linesize[i]= pic_arg->linesize[i];
+    	}
+    	s->new_picture.pict_type = 3;
+
+    	s->input_picture[2] = (Picture*)pic_arg;
+    	s->pict_type = 3;
+
+    }*/
+    //********************************//
     /* output? */
     if(s->new_picture.data[0]){
-        s->pict_type= s->new_picture.pict_type;
+        //s->pict_type= s->new_picture.pict_type;
+    if(delay_decide == 2)  //I
+    {
+    	s->pict_type = 1;
+    	s->new_picture.pict_type = 1;
+    }
+    else if(delay_decide == 4)  //P
+    {
+    	s->pict_type = 2;
+    	s->new_picture.pict_type = 2;
+    }
+    else if(delay_decide == 1)  //B
+    {
+    	s->pict_type = 3;
+    	s->new_picture.pict_type = 3;
+    }
 //emms_c();
 //printf("qs:%f %f %d\n", s->new_picture.quality, s->current_picture.quality, s->qscale);
-        MPV_frame_start(s, avctx);
+        //s->encoding = 1;
+        Encode_MPV_frame_start(s, avctx);
+        //s->encoding = 1;
 vbv_retry:
         if (encode_picture(s, s->picture_number) < 0)
             return -1;
@@ -1276,7 +1379,7 @@ vbv_retry:
         avctx->p_count     = s->mb_num - s->i_count - s->skip_count; //FIXME f/b_count in avctx
         avctx->skip_count  = s->skip_count;
 
-        MPV_frame_end(s);
+       // Encode_MPV_frame_end(s);
 
         if (CONFIG_MJPEG_ENCODER && s->out_format == FMT_MJPEG)
             ff_mjpeg_encode_picture_trailer(s);

@@ -916,7 +916,7 @@ int MPV_frame_start(MpegEncContext *s, AVCodecContext *avctx)
 
     assert(s->last_picture_ptr==NULL || s->out_format != FMT_H264 || s->codec_id == CODEC_ID_SVQ3);
 
-    /* mark&release old frames */
+    /* mark&release old frames */ //4p no enter
     if (s->pict_type != FF_B_TYPE && s->last_picture_ptr && s->last_picture_ptr != s->next_picture_ptr && s->last_picture_ptr->data[0]) {
       if(s->out_format != FMT_H264 || s->codec_id == CODEC_ID_SVQ3){
           free_frame_buffer(s, s->last_picture_ptr);
@@ -934,7 +934,7 @@ int MPV_frame_start(MpegEncContext *s, AVCodecContext *avctx)
       }
     }
 
-    if(!s->encoding){
+    if(!s->encoding){  //4p no enter
         /* release non reference frames */
         for(i=0; i<MAX_PICTURE_COUNT; i++){
             if(s->picture[i].data[0] && !s->picture[i].reference /*&& s->picture[i].type!=FF_BUFFER_TYPE_SHARED*/){
@@ -979,9 +979,9 @@ int MPV_frame_start(MpegEncContext *s, AVCodecContext *avctx)
 
     ff_copy_picture(&s->current_picture, s->current_picture_ptr);
 
-    if (s->pict_type != FF_B_TYPE) {
+    if (s->pict_type != FF_B_TYPE) {  //4p enter
         s->last_picture_ptr= s->next_picture_ptr;
-        if(!s->dropable)
+        if(!s->dropable)  //4p enter
             s->next_picture_ptr= s->current_picture_ptr;
     }
 /*    av_log(s->avctx, AV_LOG_DEBUG, "L%p N%p C%p L%p N%p C%p type:%d drop:%d\n", s->last_picture_ptr, s->next_picture_ptr,s->current_picture_ptr,
@@ -989,9 +989,8 @@ int MPV_frame_start(MpegEncContext *s, AVCodecContext *avctx)
         s->next_picture_ptr    ? s->next_picture_ptr->data[0] : NULL,
         s->current_picture_ptr ? s->current_picture_ptr->data[0] : NULL,
         s->pict_type, s->dropable);*/
-
-    if(s->codec_id != CODEC_ID_H264){
-        if((s->last_picture_ptr==NULL || s->last_picture_ptr->data[0]==NULL) && s->pict_type!=FF_I_TYPE){
+    if(s->codec_id != CODEC_ID_H264){  //4p enter
+        if((s->last_picture_ptr==NULL || s->last_picture_ptr->data[0]==NULL) && s->pict_type!=FF_I_TYPE){  //4p no enter
             av_log(avctx, AV_LOG_ERROR, "warning: first frame is no keyframe\n");
             /* Allocate a dummy frame */
             i= ff_find_unused_picture(s, 0);
@@ -999,7 +998,7 @@ int MPV_frame_start(MpegEncContext *s, AVCodecContext *avctx)
             if(ff_alloc_picture(s, s->last_picture_ptr, 0) < 0)
                 return -1;
         }
-        if((s->next_picture_ptr==NULL || s->next_picture_ptr->data[0]==NULL) && s->pict_type==FF_B_TYPE){
+        if((s->next_picture_ptr==NULL || s->next_picture_ptr->data[0]==NULL) && s->pict_type==FF_B_TYPE){  //4p no enter
             /* Allocate a dummy frame */
             i= ff_find_unused_picture(s, 0);
             s->next_picture_ptr= &s->picture[i];
@@ -1011,9 +1010,10 @@ int MPV_frame_start(MpegEncContext *s, AVCodecContext *avctx)
     if(s->last_picture_ptr) ff_copy_picture(&s->last_picture, s->last_picture_ptr);
     if(s->next_picture_ptr) ff_copy_picture(&s->next_picture, s->next_picture_ptr);
 
+
     assert(s->pict_type == FF_I_TYPE || (s->last_picture_ptr && s->last_picture_ptr->data[0]));
 
-    if(s->picture_structure!=PICT_FRAME && s->out_format != FMT_H264){
+    if(s->picture_structure!=PICT_FRAME && s->out_format != FMT_H264){  //4p no enter
         int i;
         for(i=0; i<4; i++){
             if(s->picture_structure == PICT_BOTTOM_FIELD){
@@ -1030,7 +1030,7 @@ int MPV_frame_start(MpegEncContext *s, AVCodecContext *avctx)
 
     /* set dequantizer, we can't do it during init as it might change for mpeg4
        and we can't do it in the header decode as init is not called for mpeg4 there yet */
-    if(s->mpeg_quant || s->codec_id == CODEC_ID_MPEG2VIDEO){
+    if(s->mpeg_quant || s->codec_id == CODEC_ID_MPEG2VIDEO){  //4p enter
         s->dct_unquantize_intra = s->dct_unquantize_mpeg2_intra;
         s->dct_unquantize_inter = s->dct_unquantize_mpeg2_inter;
     }else if(s->out_format == FMT_H263 || s->out_format == FMT_H261){
@@ -1052,7 +1052,62 @@ int MPV_frame_start(MpegEncContext *s, AVCodecContext *avctx)
 
     return 0;
 }
+int Encode_MPV_frame_start(MpegEncContext *s, AVCodecContext *avctx)
+{
+    int i;
+    Picture *pic;
+    s->mb_skipped = 0;
 
+    s->current_picture_ptr->pict_type= s->pict_type;
+//    if(s->flags && CODEC_FLAG_QSCALE)
+  //      s->current_picture_ptr->quality= s->new_picture_ptr->quality;
+    s->current_picture_ptr->key_frame= s->pict_type == FF_I_TYPE;
+
+    ff_copy_picture(&s->current_picture, s->current_picture_ptr);
+
+    if (s->pict_type != FF_B_TYPE) {  //4p enter
+        s->last_picture_ptr= s->next_picture_ptr;
+        if(!s->dropable)  //4p enter
+            s->next_picture_ptr= s->current_picture_ptr;
+    }
+/*    av_log(s->avctx, AV_LOG_DEBUG, "L%p N%p C%p L%p N%p C%p type:%d drop:%d\n", s->last_picture_ptr, s->next_picture_ptr,s->current_picture_ptr,
+        s->last_picture_ptr    ? s->last_picture_ptr->data[0] : NULL,
+        s->next_picture_ptr    ? s->next_picture_ptr->data[0] : NULL,
+        s->current_picture_ptr ? s->current_picture_ptr->data[0] : NULL,
+        s->pict_type, s->dropable);*/
+
+
+    if(s->last_picture_ptr) ff_copy_picture(&s->last_picture, s->last_picture_ptr);
+    if(s->next_picture_ptr) ff_copy_picture(&s->next_picture, s->next_picture_ptr);
+
+
+    s->hurry_up= s->avctx->hurry_up;
+    s->error_recognition= avctx->error_recognition;
+
+    /* set dequantizer, we can't do it during init as it might change for mpeg4
+       and we can't do it in the header decode as init is not called for mpeg4 there yet */
+    if(s->mpeg_quant || s->codec_id == CODEC_ID_MPEG2VIDEO){  //4p enter
+        s->dct_unquantize_intra = s->dct_unquantize_mpeg2_intra;
+        s->dct_unquantize_inter = s->dct_unquantize_mpeg2_inter;
+    }else if(s->out_format == FMT_H263 || s->out_format == FMT_H261){
+        s->dct_unquantize_intra = s->dct_unquantize_h263_intra;
+        s->dct_unquantize_inter = s->dct_unquantize_h263_inter;
+    }else{
+        s->dct_unquantize_intra = s->dct_unquantize_mpeg1_intra;
+        s->dct_unquantize_inter = s->dct_unquantize_mpeg1_inter;
+    }
+
+    if(s->dct_error_sum){
+        assert(s->avctx->noise_reduction && s->encoding);
+
+        update_noise_reduction(s);
+    }
+
+    if(CONFIG_MPEG_XVMC_DECODER && s->avctx->xvmc_acceleration)
+        return ff_xvmc_field_start(s, avctx);
+
+    return 0;
+}
 /* generic function for encode/decode called after a frame has been coded/decoded */
 void MPV_frame_end(MpegEncContext *s)
 {
@@ -1103,6 +1158,22 @@ void MPV_frame_end(MpegEncContext *s)
     memset(&s->next_picture, 0, sizeof(Picture));
     memset(&s->current_picture, 0, sizeof(Picture));
 #endif
+    s->avctx->coded_frame= (AVFrame*)s->current_picture_ptr;
+}
+void Encode_MPV_frame_end(MpegEncContext *s)
+{
+    int i;
+    /* draw edge for correct motion prediction if outside */
+    //just to make sure that all data is rendered.
+
+
+        /* release non-reference frames */
+        for(i=0; i<MAX_PICTURE_COUNT; i++){
+            if(s->picture[i].data[0] /*&& !s->picture[i].reference && s->picture[i].type!=FF_BUFFER_TYPE_SHARED*/){
+                free_frame_buffer(s, &s->picture[i]);
+            }
+        }
+
     s->avctx->coded_frame= (AVFrame*)s->current_picture_ptr;
 }
 
